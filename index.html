@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Agency Ledger</title>
+  <meta name="description" content="Offline monthly income and expense tracker for agencies." />
+  <meta name="theme-color" content="#111827" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Agency Ledger" />
+
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+  <style>
+    html, body { height: 100%; }
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: #e5e7eb;
+      background-image: radial-gradient(#cbd5e1 1.5px, transparent 1.5px);
+      background-size: 22px 22px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .shell { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+    input[type=number]::-webkit-outer-spin-button,
+    input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+    .tabnum { font-variant-numeric: tabular-nums; }
+    /* Delete button: hidden until hover, keyboard focus, or a tap on the row (touch) */
+    .txn .del { opacity: 0; transform: scale(.9); transition: opacity .15s, transform .15s; }
+    .txn:hover .del, .txn:focus-within .del, .txn:focus .del, .txn.revealed .del { opacity: 1; transform: scale(1); }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+  </style>
+</head>
+
+<body class="text-slate-900">
+  <div class="shell">
+    <main class="max-w-md mx-auto min-h-screen bg-slate-50 border-x-4 border-[#111827] shadow-[12px_12px_0_0_#111827] md:my-6 md:border-4 md:min-h-0">
+
+      <!-- HEADER -->
+      <header class="bg-[#111827] text-white px-5 pt-5 pb-6 border-b-4 border-black">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h1 class="text-2xl font-black tracking-tight leading-none">Agency Ledger</h1>
+            <p id="monthLabel" class="mt-1.5 text-sm font-black text-indigo-300"></p>
+          </div>
+          <button id="newMonthBtn" type="button" aria-label="Start new month"
+            class="shrink-0 w-12 h-12 grid place-items-center border-4 border-white bg-[#111827] text-white text-lg hover:bg-white hover:text-[#111827] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-indigo-400 transition-colors">
+            <i class="fa-solid fa-calendar-plus" aria-hidden="true"></i>
+          </button>
+        </div>
+
+        <div class="mt-6">
+          <p class="text-sm font-black text-slate-400">Net balance</p>
+          <p id="netBalance" class="tabnum text-4xl font-black tracking-tight break-all">₹0.00</p>
+        </div>
+
+        <div class="mt-5 grid grid-cols-2 gap-3">
+          <div class="border-4 border-emerald-400 p-3">
+            <p class="text-xs font-black text-emerald-300"><i class="fa-solid fa-arrow-trend-up mr-1" aria-hidden="true"></i>Total income</p>
+            <p id="totalIncome" class="tabnum text-lg font-black text-emerald-400 break-all">₹0.00</p>
+          </div>
+          <div class="border-4 border-red-400 p-3">
+            <p class="text-xs font-black text-red-300"><i class="fa-solid fa-arrow-trend-down mr-1" aria-hidden="true"></i>Total expenses</p>
+            <p id="totalExpense" class="tabnum text-lg font-black text-red-400 break-all">₹0.00</p>
+          </div>
+        </div>
+      </header>
+
+      <!-- ADD TRANSACTION -->
+      <section class="p-5" aria-labelledby="formTitle">
+        <h2 id="formTitle" class="text-xl font-black mb-4">Add transaction</h2>
+
+        <form id="txnForm" class="space-y-4 border-4 border-[#111827] bg-white p-4" autocomplete="off">
+          <!-- Type toggle -->
+          <fieldset>
+            <legend class="sr-only">Transaction type</legend>
+            <div class="grid grid-cols-2 border-4 border-[#111827]">
+              <label class="cursor-pointer">
+                <input type="radio" name="type" value="expense" class="peer sr-only" checked />
+                <span class="flex items-center justify-center gap-2 py-3 font-black bg-white text-[#111827] peer-checked:bg-[#111827] peer-checked:text-white peer-focus-visible:outline peer-focus-visible:outline-4 peer-focus-visible:-outline-offset-4 peer-focus-visible:outline-indigo-500">
+                  <i class="fa-solid fa-arrow-down" aria-hidden="true"></i> Expense
+                </span>
+              </label>
+              <label class="cursor-pointer border-l-4 border-[#111827]">
+                <input type="radio" name="type" value="income" class="peer sr-only" />
+                <span class="flex items-center justify-center gap-2 py-3 font-black bg-white text-[#111827] peer-checked:bg-[#111827] peer-checked:text-white peer-focus-visible:outline peer-focus-visible:outline-4 peer-focus-visible:-outline-offset-4 peer-focus-visible:outline-indigo-500">
+                  <i class="fa-solid fa-arrow-up" aria-hidden="true"></i> Income
+                </span>
+              </label>
+            </div>
+          </fieldset>
+
+          <!-- Amount -->
+          <div>
+            <label for="amount" class="block text-sm font-black mb-1">Amount</label>
+            <div class="flex items-center border-4 border-[#111827] focus-within:ring-4 focus-within:ring-indigo-400">
+              <span class="px-4 text-3xl font-black bg-slate-100 self-stretch flex items-center border-r-4 border-[#111827]">₹</span>
+              <input id="amount" name="amount" type="number" inputmode="decimal" step="0.01" min="0.01" required placeholder="0.00"
+                class="tabnum w-full min-w-0 px-3 py-4 text-3xl font-black outline-none placeholder:text-slate-300 bg-white" />
+            </div>
+          </div>
+
+          <!-- Description -->
+          <div>
+            <label for="desc" class="block text-sm font-black mb-1">Description</label>
+            <input id="desc" name="desc" type="text" maxlength="80" placeholder="e.g. Figma team licenses"
+              class="w-full px-4 py-4 text-lg font-bold border-4 border-[#111827] outline-none focus:ring-4 focus:ring-indigo-400 placeholder:text-slate-300 placeholder:font-semibold" />
+          </div>
+
+          <!-- Category chips -->
+          <fieldset>
+            <legend class="block text-sm font-black mb-2">Category</legend>
+            <div id="chips" class="flex flex-wrap gap-2"></div>
+          </fieldset>
+
+          <button type="submit"
+            class="w-full bg-[#111827] text-white text-lg font-black py-4 border-4 border-[#111827] shadow-[5px_5px_0_0_#6366f1] active:translate-x-[3px] active:translate-y-[3px] active:shadow-[2px_2px_0_0_#6366f1] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 transition-all">
+            <i class="fa-solid fa-plus mr-2" aria-hidden="true"></i>Record transaction
+          </button>
+        </form>
+      </section>
+
+      <!-- TRANSACTION LIST -->
+      <section class="px-5 pb-2" aria-labelledby="listTitle">
+        <div class="flex items-baseline justify-between mb-3">
+          <h2 id="listTitle" class="text-xl font-black">Transactions</h2>
+          <span id="countLabel" class="text-sm font-black text-slate-500"></span>
+        </div>
+        <ul id="txnList" class="space-y-3"></ul>
+        <div id="emptyState" class="hidden border-4 border-dashed border-slate-400 p-6 text-center">
+          <i class="fa-solid fa-receipt text-3xl text-slate-400" aria-hidden="true"></i>
+          <p class="mt-2 font-black">Nothing recorded this month</p>
+          <p class="text-sm font-semibold text-slate-500">Add your first income or expense above.</p>
+        </div>
+      </section>
+
+      <!-- EXPORT / IMPORT -->
+      <section class="p-5 space-y-3">
+        <button id="pdfBtn" type="button"
+          class="w-full bg-[#111827] text-white font-black py-4 border-4 border-[#111827] shadow-[5px_5px_0_0_#6366f1] active:translate-x-[3px] active:translate-y-[3px] active:shadow-[2px_2px_0_0_#6366f1] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 transition-all">
+          <i class="fa-solid fa-file-pdf mr-2" aria-hidden="true"></i>Download monthly PDF
+        </button>
+        <button id="importBtn" type="button"
+          class="w-full bg-white text-[#111827] font-black py-4 border-4 border-[#111827] hover:bg-slate-100 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">
+          <i class="fa-solid fa-file-import mr-2" aria-hidden="true"></i>Import bank PDF
+        </button>
+        <p class="pt-2 text-center text-xs font-bold text-slate-500">
+          <i class="fa-solid fa-lock mr-1" aria-hidden="true"></i>Stored only on this device. Works offline.
+        </p>
+      </section>
+
+      <!-- SAVED MONTHLY REPORTS -->
+      <section class="px-5 pb-8" aria-labelledby="archiveTitle">
+        <div class="flex items-baseline justify-between mb-3">
+          <h2 id="archiveTitle" class="text-xl font-black">Saved reports</h2>
+          <span id="archiveCount" class="text-sm font-black text-slate-500"></span>
+        </div>
+        <ul id="archiveList" class="space-y-3"></ul>
+        <div id="archiveEmpty" class="hidden border-4 border-dashed border-slate-400 p-6 text-center">
+          <i class="fa-solid fa-box-archive text-3xl text-slate-400" aria-hidden="true"></i>
+          <p class="mt-2 font-black">No saved reports yet</p>
+          <p class="text-sm font-semibold text-slate-500">Each PDF you download, and each month you close, is kept here on this device.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" role="status" aria-live="polite"
+    class="fixed left-1/2 -translate-x-1/2 bottom-6 z-50 hidden max-w-[90vw] bg-[#111827] text-white font-black px-5 py-3 border-4 border-white shadow-[5px_5px_0_0_#6366f1]"></div>
+
+  <script>
+    (() => {
+      'use strict';
+
+      const STORAGE_KEY = 'agencyLedger.transactions.v1';
+      const CURRENCY = '₹';       // shown in the app
+      const PDF_CURRENCY = 'Rs.'; // jsPDF's built-in fonts can't draw the ₹ glyph
+
+      const CATEGORIES = [
+        { name: 'General', icon: 'fa-layer-group' },
+        { name: 'Food',    icon: 'fa-utensils' },
+        { name: 'Salary',  icon: 'fa-money-bill-wave' },
+        { name: 'Rent',    icon: 'fa-house' },
+        { name: 'EMI',     icon: 'fa-building-columns' },
+        { name: 'Others',  icon: 'fa-ellipsis' }
+      ];
+      const iconFor = (name) => (CATEGORIES.find(c => c.name === name) || CATEGORIES[CATEGORIES.length - 1]).icon;
+
+      /* ---------- State & storage ---------- */
+      const load = () => {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          const data = raw ? JSON.parse(raw) : [];
+          return Array.isArray(data) ? data : [];
+        } catch (e) { return []; }
+      };
+      const save = () => {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(txns)); }
+        catch (e) { toast('Could not save. Storage may be full or blocked.'); }
+      };
+      let txns = load();
+
+      /* ---------- Helpers ---------- */
+      const $ = (id) => document.getElementById(id);
+      const money = (n, cur = CURRENCY) =>
+        cur + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const sums = (list) => {
+        const income = list.filter(t => t.type === 'income').reduce((a, t) => a + t.amount, 0);
+        const expense = list.filter(t => t.type === 'expense').reduce((a, t) => a + t.amount, 0);
+        return { income, expense, net: income - expense };
+      };
+      const monthLabel = () => new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      const fmtDate = (iso) => new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+      let toastTimer;
+      function toast(msg) {
+        const el = $('toast');
+        el.textContent = msg;
+        el.classList.remove('hidden');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => el.classList.add('hidden'), 2600);
+      }
+
+      /* ---------- Category chips ---------- */
+      function buildChips() {
+        $('chips').innerHTML = CATEGORIES.map((c, i) => `
+          <label class="cursor-pointer">
+            <input type="radio" name="category" value="${c.name}" class="peer sr-only" ${i === 0 ? 'checked' : ''} />
+            <span class="inline-flex items-center gap-2 px-4 py-2.5 font-black border-4 border-[#111827] bg-white text-[#111827]
+                         peer-checked:bg-[#111827] peer-checked:text-white
+                         peer-focus-visible:outline peer-focus-visible:outline-4 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-indigo-500">
+              <i class="fa-solid ${c.icon}" aria-hidden="true"></i>${c.name}
+            </span>
+          </label>`).join('');
+      }
+
+      /* ---------- Render ---------- */
+      function render() {
+        $('monthLabel').textContent = monthLabel();
+
+        const { income, expense, net } = sums(txns);
+        $('totalIncome').textContent = money(income);
+        $('totalExpense').textContent = money(expense);
+        const netEl = $('netBalance');
+        netEl.textContent = (net < 0 ? '-' : '') + money(Math.abs(net));
+        netEl.classList.toggle('text-red-300', net < 0);
+
+        const sorted = [...txns].sort((a, b) => new Date(b.date) - new Date(a.date) || b.id.localeCompare(a.id));
+        const list = $('txnList');
+        list.innerHTML = '';
+
+        sorted.forEach(t => {
+          const isIncome = t.type === 'income';
+          const li = document.createElement('li');
+          li.className = 'txn bg-white border-4 border-[#111827] p-3 flex items-center gap-3 outline-none focus-visible:ring-4 focus-visible:ring-indigo-400';
+          li.tabIndex = 0;
+          li.dataset.id = t.id;
+          li.innerHTML = `
+            <div class="shrink-0 w-12 h-12 grid place-items-center bg-[#111827] text-white text-lg">
+              <i class="fa-solid ${iconFor(t.category)}" aria-hidden="true"></i>
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="desc font-black truncate"></p>
+              <p class="text-xs font-bold text-slate-500">${t.category}, ${fmtDate(t.date)}</p>
+            </div>
+            <p class="tabnum shrink-0 font-black text-right ${isIncome ? 'text-emerald-600' : 'text-red-600'}">
+              ${isIncome ? '+' : '-'}${money(t.amount)}
+            </p>
+            <button type="button" class="del shrink-0 w-10 h-10 grid place-items-center border-4 border-[#111827] text-[#111827] hover:bg-red-600 hover:border-red-600 hover:text-white focus-visible:bg-red-600 focus-visible:border-red-600 focus-visible:text-white"
+              aria-label="Delete transaction">
+              <i class="fa-solid fa-trash" aria-hidden="true"></i>
+            </button>`;
+          li.querySelector('.desc').textContent = t.desc; // textContent keeps user input safe
+          list.appendChild(li);
+        });
+
+        $('emptyState').classList.toggle('hidden', sorted.length > 0);
+        $('countLabel').textContent = sorted.length ? `${sorted.length} ${sorted.length === 1 ? 'entry' : 'entries'}` : '';
+      }
+
+      /* ---------- Events ---------- */
+      $('txnForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const f = e.target;
+        const amount = parseFloat(f.amount.value);
+        if (!(amount > 0)) { toast('Enter an amount greater than zero.'); f.amount.focus(); return; }
+        const category = f.category.value;
+        txns.push({
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          type: f.type.value,
+          amount: Math.round(amount * 100) / 100,
+          desc: f.desc.value.trim() || category,
+          category,
+          date: new Date().toISOString()
+        });
+        save();
+        render();
+        f.amount.value = '';
+        f.desc.value = '';
+        f.amount.focus();
+        toast('Transaction recorded');
+      });
+
+      $('txnList').addEventListener('click', (e) => {
+        const row = e.target.closest('.txn');
+        if (!row) return;
+        if (e.target.closest('.del')) {
+          txns = txns.filter(t => t.id !== row.dataset.id);
+          save();
+          render();
+          toast('Transaction deleted');
+          return;
+        }
+        // Tap-to-reveal for touch screens (no hover available)
+        const wasOpen = row.classList.contains('revealed');
+        document.querySelectorAll('.txn.revealed').forEach(r => r.classList.remove('revealed'));
+        if (!wasOpen) row.classList.add('revealed');
+      });
+
+      $('newMonthBtn').addEventListener('click', async () => {
+        if (!txns.length) { toast('This month is already empty.'); return; }
+        const ok = confirm("Start a new month?\n\nThis month's PDF report is saved in Saved reports on this device first. Then all current transactions are cleared.");
+        if (!ok) return;
+        try {
+          if (!pdfReady()) throw new Error('PDF library not loaded');
+          const { record } = snapshot(txns, true);
+          await putReport(record);
+          await removeReport(record.monthKey); // replace the live snapshot with the closed copy
+        } catch (err) {
+          console.warn(err);
+          if (!confirm('The PDF report could not be saved. Clear this month anyway?')) return;
+        }
+        localStorage.removeItem(STORAGE_KEY);
+        txns = [];
+        $('txnForm').reset();
+        render();
+        renderArchive();
+        toast('New month started. Report saved.');
+      });
+
+      $('importBtn').addEventListener('click', () => {
+        alert('PDF Parsing requires backend OCR integration. Please log manually.');
+      });
+
+      /* ---------- Saved reports (IndexedDB, on this device) ---------- */
+      const DB_NAME = 'agencyLedger', STORE = 'reports';
+      let dbPromise;
+      const openDb = () => dbPromise || (dbPromise = new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = () => req.result.createObjectStore(STORE, { keyPath: 'key' });
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      }));
+      const run = async (mode, fn) => {
+        const d = await openDb();
+        return new Promise((resolve, reject) => {
+          const t = d.transaction(STORE, mode);
+          const req = fn(t.objectStore(STORE));
+          t.oncomplete = () => resolve(req.result);
+          t.onerror = t.onabort = () => reject(t.error);
+        });
+      };
+      const putReport = (r) => run('readwrite', s => s.put(r));
+      const getReport = (k) => run('readonly', s => s.get(k));
+      const listReports = () => run('readonly', s => s.getAll());
+      const removeReport = (k) => run('readwrite', s => s.delete(k));
+
+      function requestPersist() {
+        if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+      }
+
+      function downloadBuffer(buf, filename) {
+        const url = URL.createObjectURL(new Blob([buf], { type: 'application/pdf' }));
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+      }
+
+      async function renderArchive() {
+        let items = [];
+        try { items = await listReports(); } catch (e) { console.warn('Archive unavailable', e); }
+        items.sort((a, b) => b.monthKey.localeCompare(a.monthKey) || b.savedAt.localeCompare(a.savedAt));
+        const ul = $('archiveList');
+        ul.innerHTML = '';
+        items.forEach(r => {
+          const li = document.createElement('li');
+          li.className = 'bg-white border-4 border-[#111827] p-3 flex items-center gap-3';
+          li.dataset.key = r.key;
+          li.innerHTML = `
+            <div class="shrink-0 w-12 h-12 grid place-items-center bg-[#111827] text-white text-lg">
+              <i class="fa-solid fa-file-pdf" aria-hidden="true"></i>
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="lbl font-black truncate"></p>
+              <p class="text-xs font-bold text-slate-500">${r.closed ? 'Month closed' : 'Snapshot'}, ${r.count} ${r.count === 1 ? 'entry' : 'entries'}, net ${r.net < 0 ? '-' : ''}${money(Math.abs(r.net))}</p>
+              <p class="text-xs font-semibold text-slate-400">Saved ${fmtDate(r.savedAt)}</p>
+            </div>
+            <button type="button" data-act="dl" aria-label="Download report" class="shrink-0 w-10 h-10 grid place-items-center bg-[#111827] text-white border-4 border-[#111827] hover:bg-indigo-600 hover:border-indigo-600 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">
+              <i class="fa-solid fa-download" aria-hidden="true"></i>
+            </button>
+            <button type="button" data-act="rm" aria-label="Delete saved report" class="shrink-0 w-10 h-10 grid place-items-center border-4 border-[#111827] text-[#111827] hover:bg-red-600 hover:border-red-600 hover:text-white focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">
+              <i class="fa-solid fa-trash" aria-hidden="true"></i>
+            </button>`;
+          li.querySelector('.lbl').textContent = r.label;
+          ul.appendChild(li);
+        });
+        $('archiveEmpty').classList.toggle('hidden', items.length > 0);
+        $('archiveCount').textContent = items.length ? `${items.length} saved` : '';
+      }
+
+      $('archiveList').addEventListener('click', async (e) => {
+        const btn = e.target.closest('button[data-act]');
+        if (!btn) return;
+        const key = btn.closest('li').dataset.key;
+        try {
+          if (btn.dataset.act === 'dl') {
+            const r = await getReport(key);
+            if (r) downloadBuffer(r.pdf, filenameFor(r.label));
+          } else if (confirm('Delete this saved report? This cannot be undone.')) {
+            await removeReport(key);
+            await renderArchive();
+            toast('Saved report deleted');
+          }
+        } catch (err) { console.warn(err); toast('Could not open saved reports.'); }
+      });
+
+      /* ---------- PDF build ---------- */
+      const pdfReady = () => !!(window.jspdf && window.jspdf.jsPDF);
+      const filenameFor = (label) => `Expense-Report-${label.replace(/\s+/g, '-')}.pdf`;
+
+      // The report month comes from the transactions themselves (their latest date),
+      // so closing October on 2 November still files it under October.
+      function reportMonth(list) {
+        const latest = list.reduce((m, t) => (t.date > m ? t.date : m), list[0].date);
+        const d = new Date(latest);
+        return {
+          key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+          label: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+        };
+      }
+
+      function buildPdf(list, label) {
+        const doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
+        const pageW = doc.internal.pageSize.getWidth();
+        const pageH = doc.internal.pageSize.getHeight();
+        const M = 40;
+        const all = sums(list);
+
+        doc.setFillColor(17, 24, 39);
+        doc.rect(0, 0, pageW, 96, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(22);
+        doc.text('Agency Ledger', M, 44);
+        doc.setFontSize(12);
+        doc.text(`Monthly expense report: ${label}`, M, 66);
+
+        const boxW = (pageW - M * 2 - 20) / 3;
+        const boxes = [
+          { t: 'Total income',   v: money(all.income, PDF_CURRENCY),  c: [22, 163, 74] },
+          { t: 'Total expenses', v: money(all.expense, PDF_CURRENCY), c: [220, 38, 38] },
+          { t: 'Net balance',    v: (all.net < 0 ? '-' : '') + money(Math.abs(all.net), PDF_CURRENCY), c: all.net < 0 ? [220, 38, 38] : [17, 24, 39] }
+        ];
+        boxes.forEach((b, i) => {
+          const x = M + i * (boxW + 10);
+          doc.setDrawColor(17, 24, 39);
+          doc.setLineWidth(2);
+          doc.rect(x, 114, boxW, 56);
+          doc.setTextColor(100, 116, 139);
+          doc.setFontSize(9);
+          doc.text(b.t, x + 10, 132);
+          doc.setTextColor(...b.c);
+          doc.setFontSize(14);
+          doc.text(b.v, x + 10, 156);
+        });
+
+        let y = 200;
+        CATEGORIES.forEach(cat => {
+          const items = list.filter(t => t.category === cat.name)
+            .sort((a, b) => new Date(a.date) - new Date(b.date));
+          if (!items.length) return;
+
+          if (y > pageH - 150) { doc.addPage(); y = 50; }
+          doc.setTextColor(17, 24, 39);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(13);
+          doc.text(cat.name, M, y);
+
+          doc.autoTable({
+            startY: y + 8,
+            margin: { left: M, right: M },
+            head: [['Date', 'Description', 'Type', 'Amount']],
+            body: items.map(t => [
+              fmtDate(t.date),
+              t.desc,
+              t.type === 'income' ? 'Income' : 'Expense',
+              (t.type === 'income' ? '+ ' : '- ') + money(t.amount, PDF_CURRENCY)
+            ]),
+            theme: 'grid',
+            styles: { font: 'helvetica', fontSize: 9.5, cellPadding: 6, lineColor: [17, 24, 39], lineWidth: 0.6 },
+            headStyles: { fillColor: [17, 24, 39], textColor: 255, fontStyle: 'bold' },
+            columnStyles: { 0: { cellWidth: 80 }, 2: { cellWidth: 60 }, 3: { halign: 'right', cellWidth: 100, fontStyle: 'bold' } },
+            didParseCell: (d) => {
+              if (d.section === 'body' && d.column.index === 3) {
+                d.cell.styles.textColor = items[d.row.index].type === 'income' ? [22, 163, 74] : [220, 38, 38];
+              }
+            }
+          });
+
+          const s = sums(items);
+          y = doc.lastAutoTable.finalY + 16;
+          if (y > pageH - 50) { doc.addPage(); y = 50; }
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(10);
+          doc.setTextColor(17, 24, 39);
+          const net = (s.net < 0 ? '-' : '') + money(Math.abs(s.net), PDF_CURRENCY);
+          doc.text(
+            `${cat.name} subtotal:  Income ${money(s.income, PDF_CURRENCY)}   Expenses ${money(s.expense, PDF_CURRENCY)}   Net ${net}`,
+            pageW - M, y, { align: 'right' }
+          );
+          y += 34;
+        });
+
+        const pages = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pages; i++) {
+          doc.setPage(i);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+          doc.setTextColor(100, 116, 139);
+          doc.text(`Generated ${new Date().toLocaleDateString('en-GB')}`, M, pageH - 20);
+          doc.text(`Page ${i} of ${pages}`, pageW - M, pageH - 20, { align: 'right' });
+        }
+        return doc;
+      }
+
+      // Builds the PDF and the record that gets stored in IndexedDB.
+      // closed=false: live snapshot, overwritten on the next download for the same month.
+      // closed=true: permanent copy made when the month is closed.
+      function snapshot(list, closed) {
+        const { key, label } = reportMonth(list);
+        const doc = buildPdf(list, label);
+        const s = sums(list);
+        return {
+          doc, label,
+          record: {
+            key: closed ? `${key}-closed-${Date.now()}` : key,
+            monthKey: key, label, closed,
+            savedAt: new Date().toISOString(),
+            count: list.length, income: s.income, expense: s.expense, net: s.net,
+            pdf: doc.output('arraybuffer')
+          }
+        };
+      }
+
+      $('pdfBtn').addEventListener('click', async () => {
+        if (!txns.length) { toast('Add a transaction before exporting.'); return; }
+        if (!pdfReady()) { toast('PDF library not loaded. Connect once to cache it.'); return; }
+
+        const { doc, label, record } = snapshot(txns, false);
+        try { await putReport(record); await renderArchive(); requestPersist(); }
+        catch (err) { console.warn('Could not save a copy', err); }
+
+        const filename = filenameFor(label);
+        const file = new File([doc.output('blob')], filename, { type: 'application/pdf' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({ files: [file], title: `Expense report, ${label}` });
+            return;
+          } catch (err) {
+            if (err && err.name === 'AbortError') return;
+          }
+        }
+        doc.save(filename);
+        toast('PDF downloaded and saved');
+      });
+
+      /* ---------- Init ---------- */
+      buildChips();
+      render();
+      renderArchive();
+      requestPersist();
+
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service worker registration failed:', err));
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
